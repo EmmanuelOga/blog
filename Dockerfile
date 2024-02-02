@@ -1,14 +1,12 @@
-FROM golang:1.21-alpine
-
-WORKDIR /usr/src/app
-
-# pre-copy/cache go.mod for pre-downloading dependencies and only redownloading them in subsequent builds if they change
-COPY go.mod go.sum ./
-RUN go mod download && go mod verify
-
+# Build.
+FROM golang:1.21 as build
+WORKDIR /go/src/app
 COPY . .
-RUN go build -v -o /usr/local/bin/app ./...
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o /go/bin/app
 
-EXPOSE 4000
-
-CMD ["app"]
+# Run.
+FROM gcr.io/distroless/static-debian11
+COPY --from=build /go/bin/app /
+EXPOSE 3000
+CMD ["/app"]
