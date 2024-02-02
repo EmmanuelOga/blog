@@ -10,7 +10,7 @@ import (
 func main() {
 	app := echo.New()
 	app.GET("/", HomeHandler)
-	app.Logger.Fatal(app.Start(":3000"))
+	app.Logger.Fatal(app.Start(":80"))
 }
 
 // This custom Render replaces Echo's echo.Context.Render() with templ's templ.Component.Render().
