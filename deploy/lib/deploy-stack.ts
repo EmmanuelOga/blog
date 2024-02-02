@@ -19,6 +19,7 @@ export class DeployStack extends cdk.Stack {
 
     const imageAsset = new ecrAssets.DockerImageAsset(this, 'BlogImage', {
       directory: `${__dirname}/../..`,
+      platform: ecrAssets.Platform.LINUX_ARM64,
     });
 
     // Create a load-balanced Fargate service and make it public
@@ -27,6 +28,10 @@ export class DeployStack extends cdk.Stack {
       desiredCount: 1,
       cpu: 256,
       memoryLimitMiB: 512,
+      runtimePlatform: {
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+        cpuArchitecture: ecs.CpuArchitecture.ARM64,
+      },
       taskImageOptions: {
         image: ecs.ContainerImage.fromEcrRepository(imageAsset.repository),
       },
