@@ -1,8 +1,8 @@
 {
-  "name": "deploy",
+  "name": "deployer",
   "version": "0.1.0",
   "bin": {
-    "deploy": "bin/deploy.js"
+    "deployer": "bin/deployer.js"
   },
   "scripts": {
     "build": "tsc",

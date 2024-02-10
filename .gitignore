@@ -20,4 +20,4 @@
 # Go workspace file
 go.work
 
-deploy/node_modules
+deployer/node_modules
