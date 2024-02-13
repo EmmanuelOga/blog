@@ -1,6 +1,10 @@
+#!/usr/bin/env node
+
 import * as cdk from 'aws-cdk-lib';
+import { aws_wafv2 as wafv2 } from 'aws-cdk-lib';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
@@ -14,7 +18,12 @@ export class DeployerStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
     });
 
-    const securityGroup = new ec2.SecurityGroup(this, 'LaunchTemplateSG', { vpc: vpc, });
+    const securityGroup = new ec2.SecurityGroup(this, 'LaunchTemplateSG', {
+      vpc: vpc,
+    });
+
+    securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP traffic from anywhere');
+    securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS traffic from anywhere');
 
     const autoScalingGroup = new autoscaling.AutoScalingGroup(this, 'AutoScalingGroup', {
       vpc,
@@ -66,6 +75,10 @@ export class DeployerStack extends cdk.Stack {
       ec2.InitCommand.shellCommand('curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o ' + composeInstallPath + 'docker-compose'),
       ec2.InitCommand.shellCommand('chmod +x ' + composeInstallPath + 'docker-compose'),
 
+      // Docker Rollout plugin.
+      ec2.InitFile.fromFileInline(composeInstallPath + 'README.md', `${__dirname}/scripts/README.md`),
+      ec2.InitFile.fromFileInline(composeInstallPath + 'docker-rollout', `${__dirname}/scripts/docker-rollout`, { mode: '000750' }),
+
       // Setup a fancy prompt for all users.
       ec2.InitCommand.shellCommand('curl -s https://ohmyposh.dev/install.sh | bash -s'),
       ec2.InitFile.fromString('/etc/profile.d/prompt.sh', 'eval "$(oh-my-posh init bash)"'),
@@ -75,5 +88,89 @@ export class DeployerStack extends cdk.Stack {
       printLog: true,
       ignoreFailures: true,
     });
+
+    // Load balancer.
+
+    const loadBalancer = new elbv2.ApplicationLoadBalancer(this, `ApplicationLoadBalancerPublic`, {
+      vpc,
+      internetFacing: true
+    });
+
+    // const httpsListener = loadBalancer.addListener('ALBListenerHttps', {
+    //   certificates: elbv2.ListenerCertificate.fromArn("Get from AWS  console .. "),
+    //   protocol: elbv2.ApplicationProtocol.HTTPS,
+    //   port: 443,
+    //   sslPolicy: elbv2.SslPolicy.TLS12
+    // })
+
+    const httpListener = loadBalancer.addListener('ALBListenerHttps', {
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      port: 80,
+    });
+
+    httpListener.addTargets('TargetGroup', {
+      port: 80,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [autoScalingGroup],
+      healthCheck: {
+        path: "/",
+        port: '80',
+        healthyHttpCodes: '200-299',
+      }
+    });
+
+    // Attach a WAFv2 WebACL to the load balancer.
+    // https://aws.amazon.com/blogs/devops/easily-protect-your-aws-cdk-defined-infrastructure-with-aws-wafv2/
+    const cfnWebACL = new wafv2.CfnWebACL(this,
+      'MyCDKWebAcl', {
+      name: 'MyCDKWebAc',
+      defaultAction: {
+        allow: {}
+      },
+      scope: 'REGIONAL',
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: 'MetricForWebACLCDK',
+        sampledRequestsEnabled: true,
+      },
+      rules: [{
+        name: 'CRSRule',
+        priority: 0,
+        statement: {
+          managedRuleGroupStatement: {
+            name: 'AWSManagedRulesCommonRuleSet',
+            vendorName: 'AWS'
+          }
+        },
+        visibilityConfig: {
+          cloudWatchMetricsEnabled: true,
+          metricName: 'MetricForWebACLCDK-CRS',
+          sampledRequestsEnabled: true,
+        },
+        overrideAction: { none: {} },
+      }]
+    });
+
+    const cfnWebACLAssociation = new wafv2.CfnWebACLAssociation(this, 'MyCDKWebACLAssociation', {
+      resourceArn: loadBalancer.loadBalancerArn,
+      webAclArn: cfnWebACL.attrArn,
+    });
   }
 }
+
+const app = new cdk.App();
+new DeployerStack(app, 'AsgTestStack', {
+  /* If you don't specify 'env', this stack will be environment-agnostic.
+   * Account/Region-dependent features and context lookups will not work,
+   * but a single synthesized template can be deployed anywhere. */
+
+  /* Uncomment the next line to specialize this stack for the AWS Account
+   * and Region that are implied by the current CLI configuration. */
+  // env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+
+  /* Uncomment the next line if you know exactly what Account and Region you
+   * want to deploy the stack to. */
+  // env: { account: '123456789012', region: 'us-east-1' },
+
+  /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
+});
