@@ -1,8 +1,14 @@
 # Build.
 FROM golang:1.21 as build
 WORKDIR /go/src/app
-COPY . .
+
+# Copy the go.mod and go.sum files and download the dependencies.
+# This allows us to cache the dependencies.
+COPY go.mod go.sum ./
 RUN go mod tidy
+
+COPY . .
+
 RUN CGO_ENABLED=0 go build -o /go/bin/app
 RUN CGO_ENABLED=0 go build -o /go/bin/hc cmd/main.go
 
